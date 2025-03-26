@@ -6,6 +6,5 @@ data = pd.read_csv("/Users/axelmolina/Desktop/Noveno Semestre/Trading/Proyecto3/
 
 if __name__ == "__main__":
     Optuna.main()
-    Best_params.main()
 
 

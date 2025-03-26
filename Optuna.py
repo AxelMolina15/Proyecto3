@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 import optuna
 import pickle
 
-
 def objective(trial, data):
     data = data.copy()
 
@@ -24,8 +23,8 @@ def objective(trial, data):
     macd_long = trial.suggest_int("macd_long", 50, 200)
     macd_signal = trial.suggest_int("macd_signal", 5, 20)
 
-    # Nuevo: Optimización de número de acciones a operar
-    n_shares = trial.suggest_int("n_shares", 100, 5000, step=100)
+    # Optimización de número de acciones a operar
+    n_shares = trial.suggest_int("n_shares", 2000, 5000, step=1000)
 
     # Cálculo de indicadores
     rsi = ta.momentum.RSIIndicator(data.Close, window=rsi_window)
@@ -33,6 +32,8 @@ def objective(trial, data):
 
     bb = ta.volatility.BollingerBands(data.Close, window=bb_window, window_dev=bb_std)
     data["BB"] = bb.bollinger_mavg()
+    data["BB_BUY"] = bb.bollinger_lband_indicator().astype(bool)
+    data["BB_SELL"] = bb.bollinger_hband_indicator().astype(bool)
 
     macd = ta.trend.MACD(data.Close, window_slow=macd_long, window_fast=macd_short, window_sign=macd_signal)
     data["MACD"] = macd.macd()
@@ -69,7 +70,7 @@ def objective(trial, data):
                 active_short = None
 
         # Abrir posición larga
-        if row.RSI < rsi_lower and row.Close < row.BB and row.MACD > row.MACD_SIGNAL and not active_long:
+        if sum([row.RSI < rsi_lower, row.BB_BUY, row.MACD > row.MACD_SIGNAL]) >= 2 and not active_long:
             cost = row.Close * n_shares * (1 + com)
             if capital >= cost:
                 capital -= cost
@@ -81,8 +82,8 @@ def objective(trial, data):
                 }
 
         # Abrir posición corta
-        if row.RSI > rsi_upper and row.Close > row.BB and row.MACD < row.MACD_SIGNAL and not active_short:
-            cost = row.Close * n_shares * (1 + com)
+        if sum([row.RSI > rsi_upper, row.BB_SELL, row.MACD < row.MACD_SIGNAL]) >= 2 and not active_short:
+            cost = row.Close * n_shares * com
             if capital >= cost:
                 capital -= cost
                 active_short = {
@@ -98,15 +99,19 @@ def objective(trial, data):
         portfolio_value.append(capital + long_val + short_val)
 
     # Cálculo de métricas de rendimiento
-    returns = np.diff(portfolio_value) / portfolio_value[:-1]
-    sharpe_ratio = np.mean(returns) / np.std(returns) * np.sqrt(252) if np.std(returns) != 0 else 0
+    rets = pd.Series(portfolio_value).pct_change().dropna()
+    er = rets.mean()
+    ev = rets.std()
+    dt = (252) * (6.5) * (60 / 5)
+    sharpe_ratio = (er * dt) / (ev * np.sqrt(dt))
+    returns = np.diff(portfolio_value) / portfolio_value[:-1]  # actual menos el anterior, entre el anterior
     downside_returns = returns[returns < 0]
-    sortino_ratio = np.mean(returns) / np.std(downside_returns) * np.sqrt(252) if np.std(downside_returns) != 0 else 0
-    calmar_ratio = np.mean(returns) * 252 / abs(min(returns)) if min(returns) != 0 else 0
+    downside_std = np.std(downside_returns)
+    sortino_ratio = (np.mean(returns) * dt) / (downside_std * np.sqrt(dt)) if downside_std != 0 else 0
+    calmar_ratio = (np.mean(returns) * dt) / abs(min(returns)) if min(returns) != 0 else 0
     win_loss_ratio = win / (win + loss) if (win + loss) != 0 else 0
 
-    return portfolio_value[-1]
-
+    return sharpe_ratio if not np.isnan(sharpe_ratio) else -np.inf
 
 def main():
     print("Running Optuna optimization...")
