@@ -116,7 +116,7 @@ def objective(trial, data):
 def main():
     print("Running Optuna optimization...")
 
-    data = pd.read_csv("/Users/axelmolina/Desktop/Noveno Semestre/Trading/Proyecto3/aapl_5m_train.csv").dropna()
+    data = pd.read_csv("aapl_5m_train.csv").dropna()
 
     study = optuna.create_study(direction="maximize")
     study.optimize(lambda x: objective(x, data), n_trials=50)
